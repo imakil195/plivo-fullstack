@@ -11,6 +11,7 @@ interface AuthContextType {
     login: (email: string, password: string) => Promise<void>;
     signup: (name: string, email: string, password: string, organizationName: string, slug?: string) => Promise<void>;
     logout: () => void;
+    setAuthData: (token: string, user: User, organization: Organization) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -77,8 +78,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setRole(null);
     };
 
+    const setAuthData = (token: string, user: User, organization: Organization) => {
+        localStorage.setItem('token', token);
+        setToken(token);
+        setUser(user);
+        setOrganization(organization);
+    };
+
     return (
-        <AuthContext.Provider value={{ user, organization, role, token, isLoading, login, signup, logout }}>
+        <AuthContext.Provider value={{ user, organization, role, token, isLoading, login, signup, logout, setAuthData }}>
             {children}
         </AuthContext.Provider>
     );

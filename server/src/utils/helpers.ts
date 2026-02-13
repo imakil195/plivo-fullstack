@@ -8,7 +8,5 @@ export function slugify(text: string): string {
 }
 
 export function generateUniqueSlug(text: string): string {
-    const base = slugify(text);
-    const suffix = Math.random().toString(36).substring(2, 6);
-    return `${base}-${suffix}`;
+    return slugify(text);
 }

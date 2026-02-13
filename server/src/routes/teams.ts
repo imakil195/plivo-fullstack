@@ -27,58 +27,106 @@ router.get('/members', async (req: AuthRequest, res: Response) => {
     }
 });
 
+import crypto from 'crypto';
+import { sendInviteEmail } from '../lib/email';
+
+// GET /api/teams/invites
+router.get('/invites', requireRole('admin'), async (req: AuthRequest, res: Response) => {
+    try {
+        const invites = await prisma.invite.findMany({
+            where: {
+                team: { organizationId: req.user!.orgId },
+            },
+            orderBy: { createdAt: 'desc' },
+        });
+        res.json(invites);
+    } catch (error) {
+        console.error('List invites error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// DELETE /api/teams/invites/:id
+router.delete('/invites/:id', requireRole('admin'), async (req: AuthRequest, res: Response) => {
+    try {
+        const { id } = req.params;
+        await prisma.invite.delete({
+            where: { id },
+        });
+        res.json({ message: 'Invite revoked' });
+    } catch (error) {
+        console.error('Revoke invite error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 // POST /api/teams/invite
 router.post('/invite', requireRole('admin'), async (req: AuthRequest, res: Response) => {
     try {
-        const { email, name, password, role } = req.body;
+        const { email, role } = req.body;
 
-        if (!email || !name || !password) {
-            res.status(400).json({ error: 'Email, name, and password are required' });
+        if (!email) {
+            res.status(400).json({ error: 'Email is required' });
             return;
         }
 
-        // Check if user already exists
-        let user = await prisma.user.findUnique({ where: { email } });
-
-        if (!user) {
-            const passwordHash = await bcrypt.hash(password, 10);
-            user = await prisma.user.create({
-                data: { email, name, passwordHash },
-            });
-        }
-
-        // Find the default team for this org
+        // Find the team
         const team = await prisma.team.findFirst({
             where: { organizationId: req.user!.orgId },
+            include: { organization: true }
         });
 
         if (!team) {
-            res.status(500).json({ error: 'No team found for organization' });
+            res.status(500).json({ error: 'No team found' });
             return;
         }
 
-        // Check if already a member
-        const existingMember = await prisma.teamMember.findUnique({
-            where: { userId_teamId: { userId: user.id, teamId: team.id } },
+        // Check if user is already a member
+        const existingMember = await prisma.teamMember.findFirst({
+            where: {
+                teamId: team.id,
+                user: { email },
+            },
         });
 
         if (existingMember) {
-            res.status(400).json({ error: 'User is already a member' });
+            res.status(400).json({ error: 'User is already a member of this team' });
             return;
         }
 
-        const member = await prisma.teamMember.create({
-            data: {
-                userId: user.id,
+        // Check if invite already exists
+        const existingInvite = await prisma.invite.findFirst({
+            where: {
                 teamId: team.id,
-                role: role || 'member',
-            },
-            include: {
-                user: { select: { id: true, name: true, email: true } },
+                email,
             },
         });
 
-        res.status(201).json(member);
+        if (existingInvite) {
+            res.status(400).json({ error: 'Invite already sent to this email' });
+            return;
+        }
+
+        // Create invite
+        const token = crypto.randomBytes(32).toString('hex');
+        const expiresAt = new Date();
+        expiresAt.setDate(expiresAt.getDate() + 7); // 7 days expiry
+
+        const invite = await prisma.invite.create({
+            data: {
+                email,
+                role: role || 'member',
+                teamId: team.id,
+                token,
+                expiresAt,
+            },
+        });
+
+        // Send email
+        const inviteLink = `${process.env.CLIENT_URL || 'http://localhost:5173'}/accept-invite?token=${token}`;
+        await sendInviteEmail(email, inviteLink, team.name);
+
+        res.status(201).json(invite);
     } catch (error) {
         console.error('Invite member error:', error);
         res.status(500).json({ error: 'Internal server error' });

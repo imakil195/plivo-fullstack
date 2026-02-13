@@ -7,6 +7,7 @@ import { SocketProvider } from '@/context/SocketContext';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import LoginPage from '@/pages/auth/LoginPage';
 import SignupPage from '@/pages/auth/SignupPage';
+import AcceptInvitePage from '@/pages/auth/AcceptInvitePage';
 import ServicesPage from '@/pages/dashboard/ServicesPage';
 import IncidentsPage from '@/pages/dashboard/IncidentsPage';
 import IncidentDetailPage from '@/pages/dashboard/IncidentDetailPage';
@@ -65,6 +66,7 @@ function AppRoutes() {
       {/* Auth routes */}
       <Route path="/login" element={<AuthRoute><LoginPage /></AuthRoute>} />
       <Route path="/signup" element={<AuthRoute><SignupPage /></AuthRoute>} />
+      <Route path="/accept-invite" element={<AcceptInvitePage />} />
 
       {/* Dashboard routes */}
       <Route

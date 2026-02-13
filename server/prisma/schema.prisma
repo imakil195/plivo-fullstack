@@ -1,5 +1,5 @@
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -31,6 +31,7 @@ model Team {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   members        TeamMember[]
+  invites        Invite[]
 }
 
 model TeamMember {
@@ -42,6 +43,19 @@ model TeamMember {
   team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   @@unique([userId, teamId])
+}
+
+model Invite {
+  id        String   @id @default(cuid())
+  email     String
+  role      String   @default("member")
+  token     String   @unique
+  expiresAt DateTime
+  teamId    String
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([email, teamId])
 }
 
 model Service {
