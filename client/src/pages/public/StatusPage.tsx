@@ -17,7 +17,7 @@ import {
     Zap,
     Wrench,
 } from 'lucide-react';
-import { format, formatDistanceToNow } from 'date-fns';
+import { format, formatDistanceToNow, formatDistance } from 'date-fns';
 import { connectSocket, joinOrgRoom, getSocket } from '@/lib/socket';
 
 const statusConfig: Record<ServiceStatus, { label: string; color: string; bg: string; icon: React.ElementType; dot: string }> = {
@@ -181,8 +181,8 @@ export default function StatusPage() {
                                             <Badge
                                                 variant="outline"
                                                 className={`${incident.status === 'investigating' ? 'bg-red-500/10 text-red-600 border-red-500/20' :
-                                                        incident.status === 'identified' ? 'bg-orange-500/10 text-orange-600 border-orange-500/20' :
-                                                            'bg-yellow-500/10 text-yellow-600 border-yellow-500/20'
+                                                    incident.status === 'identified' ? 'bg-orange-500/10 text-orange-600 border-orange-500/20' :
+                                                        'bg-yellow-500/10 text-yellow-600 border-yellow-500/20'
                                                     }`}
                                             >
                                                 {incidentStatusConfig[incident.status]?.label || incident.status}
@@ -220,30 +220,43 @@ export default function StatusPage() {
                 )}
 
                 {/* Scheduled maintenance */}
-                {maintenanceData && maintenanceData.length > 0 && (
+                {maintenanceData && (
                     <div className="mb-8">
                         <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
                             <Wrench className="h-5 w-5 text-blue-500" />
                             Scheduled Maintenance
                         </h2>
-                        <div className="space-y-3">
-                            {maintenanceData.map((m) => (
-                                <Card key={m.id} className="border-blue-500/20">
-                                    <CardContent className="py-4">
-                                        <div className="flex items-center justify-between mb-1">
-                                            <h3 className="font-semibold">{m.title}</h3>
-                                            <Badge variant="outline" className="bg-blue-500/10 text-blue-600 border-blue-500/20">
-                                                {m.status === 'in_progress' ? 'In Progress' : 'Scheduled'}
-                                            </Badge>
-                                        </div>
-                                        <p className="text-sm text-muted-foreground">
-                                            {m.service.name} · {format(new Date(m.scheduledStart), 'MMM d, HH:mm')} – {format(new Date(m.scheduledEnd), 'MMM d, HH:mm')}
-                                        </p>
-                                        {m.description && <p className="text-sm mt-2">{m.description}</p>}
-                                    </CardContent>
-                                </Card>
-                            ))}
-                        </div>
+                        {maintenanceData.length > 0 ? (
+                            <div className="space-y-3">
+                                {maintenanceData.map((m) => {
+                                    const start = new Date(m.scheduledStart);
+                                    const end = new Date(m.scheduledEnd);
+                                    return (
+                                        <Card key={m.id} className="border-blue-500/20">
+                                            <CardContent className="py-4">
+                                                <div className="flex items-center justify-between mb-1">
+                                                    <h3 className="font-semibold">{m.title}</h3>
+                                                    <Badge variant="outline" className="bg-blue-500/10 text-blue-600 border-blue-500/20">
+                                                        {m.status === 'in_progress' ? 'In Progress' : 'Scheduled'}
+                                                    </Badge>
+                                                </div>
+                                                <p className="text-sm text-muted-foreground">
+                                                    {m.service.name} · {format(start, 'EEEE, MMM d • h:mm a')} - {format(end, 'h:mm a')}
+                                                    <span className="opacity-75 ml-1">
+                                                        ({formatDistance(end, start)})
+                                                    </span>
+                                                </p>
+                                                {m.description && <p className="text-sm mt-2">{m.description}</p>}
+                                            </CardContent>
+                                        </Card>
+                                    );
+                                })}
+                            </div>
+                        ) : (
+                            <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+                                No scheduled maintenance
+                            </div>
+                        )}
                     </div>
                 )}
 
@@ -258,12 +271,27 @@ export default function StatusPage() {
                             {statusData.services.map((service) => {
                                 const config = statusConfig[service.status];
                                 const Icon = config.icon;
+                                // Find active maintenance for this service
+                                const activeMaintenance = maintenanceData?.find(
+                                    m => m.serviceId === service.id && m.status !== 'completed'
+                                );
+
                                 return (
                                     <div key={service.id} className="flex items-center justify-between py-4">
                                         <div>
                                             <h3 className="font-medium">{service.name}</h3>
                                             {service.description && (
                                                 <p className="text-sm text-muted-foreground">{service.description}</p>
+                                            )}
+                                            {activeMaintenance && (
+                                                <div className="text-xs text-blue-600 mt-1 flex items-center gap-1.5 bg-blue-50 px-2 py-0.5 rounded w-fit dark:bg-blue-900/30 dark:text-blue-400">
+                                                    <Calendar className="h-3 w-3" />
+                                                    <span>
+                                                        {activeMaintenance.status === 'in_progress' ? 'Maintenance in progress' :
+                                                            `Scheduled maintenance: ${format(new Date(activeMaintenance.scheduledStart), 'MMM d, h:mm a')}`
+                                                        }
+                                                    </span>
+                                                </div>
                                             )}
                                         </div>
                                         <div className={`flex items-center gap-2 ${config.color}`}>
@@ -283,29 +311,35 @@ export default function StatusPage() {
                 </div>
 
                 {/* Recent incident history */}
-                {incidentData && incidentData.recent.length > 0 && (
+                {incidentData && (
                     <div className="mb-8">
                         <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
                             <Clock className="h-5 w-5" />
                             Past Incidents
                         </h2>
-                        <div className="space-y-4">
-                            {incidentData.recent.map((incident) => (
-                                <Card key={incident.id}>
-                                    <CardContent className="py-4">
-                                        <div className="flex items-center justify-between mb-2">
-                                            <h3 className="font-semibold">{incident.title}</h3>
-                                            <Badge variant="outline" className="bg-emerald-500/10 text-emerald-600 border-emerald-500/20">
-                                                Resolved
-                                            </Badge>
-                                        </div>
-                                        <p className="text-sm text-muted-foreground">
-                                            {incident.service.name} · Resolved {incident.resolvedAt && formatDistanceToNow(new Date(incident.resolvedAt), { addSuffix: true })}
-                                        </p>
-                                    </CardContent>
-                                </Card>
-                            ))}
-                        </div>
+                        {incidentData.recent.length > 0 ? (
+                            <div className="space-y-4">
+                                {incidentData.recent.map((incident) => (
+                                    <Card key={incident.id}>
+                                        <CardContent className="py-4">
+                                            <div className="flex items-center justify-between mb-2">
+                                                <h3 className="font-semibold">{incident.title}</h3>
+                                                <Badge variant="outline" className="bg-emerald-500/10 text-emerald-600 border-emerald-500/20">
+                                                    Resolved
+                                                </Badge>
+                                            </div>
+                                            <p className="text-sm text-muted-foreground">
+                                                {incident.service.name} · Resolved {incident.resolvedAt && formatDistanceToNow(new Date(incident.resolvedAt), { addSuffix: true })}
+                                            </p>
+                                        </CardContent>
+                                    </Card>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+                                No recent incidents
+                            </div>
+                        )}
                     </div>
                 )}
 

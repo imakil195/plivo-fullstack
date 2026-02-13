@@ -32,4 +32,10 @@ api.interceptors.response.use(
     }
 );
 
+
+export const checkSlug = async (slug: string): Promise<boolean> => {
+    const response = await api.post('/auth/check-slug', { slug });
+    return response.data.available;
+};
+
 export default api;
