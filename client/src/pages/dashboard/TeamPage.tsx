@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
 import type { TeamMember } from '@/types';
@@ -30,40 +30,70 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Mail, MoreVertical, Plus, Shield, User, UserMinus, Users, X } from 'lucide-react';
+import { Copy, Mail, MoreVertical, Plus, Shield, User, UserMinus, Users, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
+import { useNavigate } from 'react-router-dom';
 
 export default function TeamPage() {
     const queryClient = useQueryClient();
     const { user } = useAuth();
     const [inviteOpen, setInviteOpen] = useState(false);
     const [email, setEmail] = useState('');
+    const [name, setName] = useState('');
     const [role, setRole] = useState('member');
+    const [isQuickAdd, setIsQuickAdd] = useState(false);
+    const [lastInviteLink, setLastInviteLink] = useState<string | null>(null);
+    const [quickAddResult, setQuickAddResult] = useState<any>(null);
+    const navigate = useNavigate();
+    const { setAuthData } = useAuth();
 
     const { data: members = [], isLoading: loadingMembers } = useQuery<TeamMember[]>({
         queryKey: ['teamMembers'],
         queryFn: async () => (await api.get('/teams/members')).data,
     });
 
-    const { data: invites = [], isLoading: loadingInvites } = useQuery<any[]>({
+    const { data: invites = [] } = useQuery<any[]>({
         queryKey: ['teamInvites'],
         queryFn: async () => (await api.get('/teams/invites')).data,
     });
 
     const inviteMutation = useMutation({
-        mutationFn: (data: { email: string; role: string }) =>
-            api.post('/teams/invite', data),
-        onSuccess: () => {
+        mutationFn: (data: any) =>
+            isQuickAdd ? api.post('/teams/quick-add', data) : api.post('/teams/invite', data),
+        onSuccess: (res) => {
             queryClient.invalidateQueries({ queryKey: ['teamMembers'] });
             queryClient.invalidateQueries({ queryKey: ['teamInvites'] });
-            setInviteOpen(false);
-            setEmail('');
-            setRole('member');
-            toast.success('Invite sent successfully');
+
+            if (res.data.directAdded) {
+                setInviteOpen(false);
+                setEmail('');
+                setName('');
+                setRole('member');
+                toast.success('User already has an account and has been added to the team!');
+            } else if (!isQuickAdd && res.data.token) {
+                const baseUrl = window.location.origin;
+                const link = `${baseUrl}/accept-invite?token=${res.data.token}`;
+                setLastInviteLink(link);
+                toast.success('Invite created! You can copy the link below.');
+            } else if (isQuickAdd) {
+                setQuickAddResult(res.data);
+                toast.success('User added directly!');
+            } else {
+                setInviteOpen(false);
+                setEmail('');
+                setName('');
+                setRole('member');
+                toast.success('Invite sent successfully');
+            }
         },
-        onError: (err: any) => toast.error(err.response?.data?.error || 'Failed to send invite'),
+        onError: (err: any) => toast.error(err.response?.data?.error || 'Failed to process request'),
     });
+
+    const copyToClipboard = (text: string) => {
+        navigator.clipboard.writeText(text);
+        toast.success('Link copied to clipboard');
+    };
 
     const updateRoleMutation = useMutation({
         mutationFn: ({ id, role }: { id: string; role: string }) =>
@@ -100,41 +130,122 @@ export default function TeamPage() {
                         </DialogTrigger>
                         <DialogContent>
                             <DialogHeader>
-                                <DialogTitle>Invite Team Member</DialogTitle>
-                                <DialogDescription>Send an invitation to join your organization.</DialogDescription>
+                                <DialogTitle>{isQuickAdd ? 'Directly Add Member' : 'Invite Team Member'}</DialogTitle>
+                                <DialogDescription>
+                                    {isQuickAdd
+                                        ? 'Instantly add a user to your team (bypasses email).'
+                                        : 'Send an invitation to join your organization.'}
+                                </DialogDescription>
                             </DialogHeader>
-                            <div className="space-y-4 py-4">
-                                <div className="space-y-2">
-                                    <Label>Email</Label>
-                                    <Input
-                                        type="email"
-                                        placeholder="john@example.com"
-                                        value={email}
-                                        onChange={(e) => setEmail(e.target.value)}
-                                    />
+
+                            {lastInviteLink || quickAddResult ? (
+                                <div className="space-y-4 py-4">
+                                    {lastInviteLink && (
+                                        <>
+                                            <div className="p-3 bg-muted rounded-md break-all text-sm font-mono">
+                                                {lastInviteLink}
+                                            </div>
+                                            <Button className="w-full" onClick={() => copyToClipboard(lastInviteLink)}>
+                                                <Copy className="h-4 w-4 mr-2" />
+                                                Copy Link
+                                            </Button>
+                                        </>
+                                    )}
+
+                                    {quickAddResult && (
+                                        <div className="space-y-4">
+                                            <div className="p-4 bg-primary/5 rounded-lg border border-primary/10 text-sm">
+                                                <p className="font-medium text-primary">User added successfully!</p>
+                                                <p className="text-muted-foreground mt-1">
+                                                    Email: <span className="text-foreground font-mono">{quickAddResult.member.user.email}</span><br />
+                                                    Password: <span className="text-foreground font-mono">demo123!</span>
+                                                </p>
+                                            </div>
+                                            <Button
+                                                className="w-full bg-indigo-600 hover:bg-indigo-700"
+                                                onClick={() => {
+                                                    setAuthData(quickAddResult.token, quickAddResult.member.user, quickAddResult.organization);
+                                                    toast.success(`Switched to ${quickAddResult.member.user.name}`);
+                                                    navigate('/');
+                                                }}
+                                            >
+                                                <Users className="h-4 w-4 mr-2" />
+                                                Switch to this Account
+                                            </Button>
+                                        </div>
+                                    )}
+
+                                    <Button variant="outline" className="w-full" onClick={() => {
+                                        setLastInviteLink(null);
+                                        setQuickAddResult(null);
+                                        setInviteOpen(false);
+                                        setEmail('');
+                                        setName('');
+                                    }}>
+                                        Close
+                                    </Button>
                                 </div>
-                                <div className="space-y-2">
-                                    <Label>Role</Label>
-                                    <Select value={role} onValueChange={setRole}>
-                                        <SelectTrigger>
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="member">Member</SelectItem>
-                                            <SelectItem value="admin">Admin</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                            </div>
-                            <DialogFooter>
-                                <Button variant="outline" onClick={() => setInviteOpen(false)}>Cancel</Button>
-                                <Button
-                                    onClick={() => inviteMutation.mutate({ email, role })}
-                                    disabled={!email || inviteMutation.isPending}
-                                >
-                                    {inviteMutation.isPending ? 'Sending...' : 'Send Invite'}
-                                </Button>
-                            </DialogFooter>
+                            ) : (
+                                <>
+                                    <div className="space-y-4 py-4">
+                                        <div className="flex items-center justify-between p-3 bg-primary/5 rounded-lg border border-primary/10">
+                                            <div className="space-y-0.5">
+                                                <Label className="text-sm font-medium">Direct Add (Demo)</Label>
+                                                <p className="text-xs text-muted-foreground text-wrap pe-4">Bypass email and add user immediately.</p>
+                                            </div>
+                                            <input
+                                                type="checkbox"
+                                                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
+                                                checked={isQuickAdd}
+                                                onChange={(e) => setIsQuickAdd(e.target.checked)}
+                                            />
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <Label>Email</Label>
+                                            <Input
+                                                type="email"
+                                                placeholder="john@example.com"
+                                                value={email}
+                                                onChange={(e) => setEmail(e.target.value)}
+                                            />
+                                        </div>
+
+                                        {isQuickAdd && (
+                                            <div className="space-y-2">
+                                                <Label>Full Name</Label>
+                                                <Input
+                                                    placeholder="John Doe"
+                                                    value={name}
+                                                    onChange={(e) => setName(e.target.value)}
+                                                />
+                                            </div>
+                                        )}
+
+                                        <div className="space-y-2">
+                                            <Label>Role</Label>
+                                            <Select value={role} onValueChange={setRole}>
+                                                <SelectTrigger>
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="member">Member</SelectItem>
+                                                    <SelectItem value="admin">Admin</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    </div>
+                                    <DialogFooter>
+                                        <Button variant="outline" onClick={() => setInviteOpen(false)}>Cancel</Button>
+                                        <Button
+                                            onClick={() => inviteMutation.mutate(isQuickAdd ? { email, name, role } : { email, role })}
+                                            disabled={!email || (isQuickAdd && !name) || inviteMutation.isPending}
+                                        >
+                                            {inviteMutation.isPending ? 'Processing...' : isQuickAdd ? 'Add Member' : 'Send Invite'}
+                                        </Button>
+                                    </DialogFooter>
+                                </>
+                            )}
                         </DialogContent>
                     </Dialog>
                 </div>
@@ -262,6 +373,15 @@ export default function TeamPage() {
                                         </div>
                                         <div className="flex items-center gap-3">
                                             <Badge variant="secondary" className="capitalize">{invite.role}</Badge>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-8 w-8 text-muted-foreground hover:text-primary"
+                                                onClick={() => copyToClipboard(invite.link)}
+                                                title="Copy Invite Link"
+                                            >
+                                                <Copy className="h-4 w-4" />
+                                            </Button>
                                             <Button
                                                 variant="ghost"
                                                 size="icon"

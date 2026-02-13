@@ -1,5 +1,6 @@
 import { Router, Response } from 'express';
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import prisma from '../lib/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { checkOrgAccess, requireRole } from '../middleware/orgAccess';
@@ -39,9 +40,95 @@ router.get('/invites', requireRole('admin'), async (req: AuthRequest, res: Respo
             },
             orderBy: { createdAt: 'desc' },
         });
-        res.json(invites);
+
+        const baseUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+        const invitesWithLinks = invites.map((invite: any) => ({
+            ...invite,
+            link: `${baseUrl}/accept-invite?token=${invite.token}`
+        }));
+
+        res.json(invitesWithLinks);
     } catch (error) {
         console.error('List invites error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// POST /api/teams/quick-add (Direct Bypass for Demo)
+router.post('/quick-add', requireRole('admin'), async (req: AuthRequest, res: Response) => {
+    try {
+        const { email, name, role } = req.body;
+
+        if (!email || !name) {
+            return res.status(400).json({ error: 'Email and name are required' });
+        }
+
+        // Find the team
+        const team = await prisma.team.findFirst({
+            where: { organizationId: req.user!.orgId },
+            include: { organization: true }
+        });
+
+        if (!team) {
+            return res.status(500).json({ error: 'No team found' });
+        }
+
+        // Check if user already exists
+        let user = await prisma.user.findUnique({ where: { email } });
+
+        if (!user) {
+            // Create user with a dummy password if they don't exist
+            // This is just for demo purposes as requested
+            const passwordHash = await require('bcryptjs').hash('demo123!', 10);
+            user = await prisma.user.create({
+                data: {
+                    email,
+                    name,
+                    passwordHash
+                }
+            });
+        }
+
+        // Check if already in team
+        const existingMember = await prisma.teamMember.findUnique({
+            where: {
+                userId_teamId: {
+                    userId: user.id,
+                    teamId: team.id
+                }
+            }
+        });
+
+        if (existingMember) {
+            return res.status(400).json({ error: 'User is already a member of this team' });
+        }
+
+        const member = await prisma.teamMember.create({
+            data: {
+                userId: user.id,
+                teamId: team.id,
+                role: role || 'member'
+            },
+            include: {
+                user: true,
+                team: { include: { organization: true } }
+            }
+        });
+
+        // Generate JWT for the NEW user so the admin can switch
+        const token = jwt.sign(
+            { userId: user.id, orgId: team.organizationId },
+            process.env.JWT_SECRET || 'secret',
+            { expiresIn: '7d' }
+        );
+
+        res.status(201).json({
+            member,
+            token,
+            organization: team.organization
+        });
+    } catch (error) {
+        console.error('Quick add error:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -92,6 +179,20 @@ router.post('/invite', requireRole('admin'), async (req: AuthRequest, res: Respo
         if (existingMember) {
             res.status(400).json({ error: 'User is already a member of this team' });
             return;
+        }
+
+        // Check if user exists but is not in team - if so, add them directly
+        const existingUser = await prisma.user.findUnique({ where: { email } });
+        if (existingUser) {
+            const member = await prisma.teamMember.create({
+                data: {
+                    userId: existingUser.id,
+                    teamId: team.id,
+                    role: role || 'member'
+                },
+                include: { user: { select: { id: true, name: true, email: true } } }
+            });
+            return res.status(200).json({ directAdded: true, member });
         }
 
         // Check if invite already exists
